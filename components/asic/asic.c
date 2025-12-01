@@ -6,6 +6,7 @@
 #include "bm1366.h"
 #include "bm1368.h"
 #include "bm1370.h"
+#include "auradine.h"
 
 #include "asic.h"
 #include "device_config.h"
@@ -28,6 +29,8 @@ uint8_t ASIC_init(GlobalState * GLOBAL_STATE)
             return BM1368_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
         case BM1370:
             return BM1370_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
+        case AURADINE:
+            return AURADINE_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
     }
     return ESP_OK;
 }
@@ -43,6 +46,8 @@ task_result * ASIC_process_work(GlobalState * GLOBAL_STATE)
             return BM1368_process_work(GLOBAL_STATE);
         case BM1370:
             return BM1370_process_work(GLOBAL_STATE);
+        case AURADINE:
+            return AURADINE_process_work(GLOBAL_STATE);
     }
     return NULL;
 }
@@ -58,6 +63,8 @@ int ASIC_set_max_baud(GlobalState * GLOBAL_STATE)
             return BM1368_set_max_baud();
         case BM1370:
             return BM1370_set_max_baud();
+        case AURADINE:
+            return AURADINE_set_max_baud();
     }
     return 0;
 }
@@ -77,6 +84,9 @@ void ASIC_send_work(GlobalState * GLOBAL_STATE, void * next_job)
         case BM1370:
             BM1370_send_work(GLOBAL_STATE, next_job);
             break;
+        case AURADINE:
+            AURADINE_send_work(GLOBAL_STATE, next_job);
+            break;
     }
 }
 
@@ -94,6 +104,9 @@ void ASIC_set_version_mask(GlobalState * GLOBAL_STATE, uint32_t mask)
             break;
         case BM1370:
             BM1370_set_version_mask(mask);
+            break;
+        case AURADINE:
+            AURADINE_set_version_mask(mask);
             break;
     }
 }
@@ -113,6 +126,9 @@ bool ASIC_set_frequency(GlobalState * GLOBAL_STATE, float frequency)
         case BM1370:
             do_frequency_transition(frequency, BM1370_send_hash_frequency);
             return true;
+        case AURADINE:
+            do_frequency_transition(frequency, AURADINE_send_hash_frequency);
+            return true;
     }
     return false;
 }
@@ -127,6 +143,7 @@ double ASIC_get_asic_job_frequency_ms(GlobalState * GLOBAL_STATE)
             return 2000 / GLOBAL_STATE->DEVICE_CONFIG.family.asic_count;
         case BM1368:
         case BM1370:
+        case AURADINE:
             return 500 / GLOBAL_STATE->DEVICE_CONFIG.family.asic_count;
     }
     return 500;
@@ -146,6 +163,9 @@ void ASIC_read_registers(GlobalState * GLOBAL_STATE)
             break;
         case BM1370:
             BM1370_read_registers();
+            break;
+        case AURADINE:
+            AURADINE_read_registers();
             break;
     }
 }
