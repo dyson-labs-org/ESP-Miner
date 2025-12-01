@@ -5,13 +5,13 @@ wifissid,data,string,myssid
 wifipass,data,string,mypass
 stratumurl,data,string,public-pool.io
 stratumport,data,u16,21496
-stratumuser,data,string,bc1qnp980s5fpp8l94p5cvttmtdqy8rvrq74qly2yrfmzkdsntqzlc5qkc4rkq.bitaxe
+stratumuser,data,string,bc1q5yn7xr7tp3sjg5d0anhjgpm5dn9mwzskxvhqzc.dyson
 stratumpass,data,string,x
 stratumdiff,data,u16,1000
 stratumxnsub,data,u16,0
 fbstratumurl,data,string,solo.ckpool.org
 fbstratumport,data,u16,3333
-fbstratumuser,data,string,bc1qnp980s5fpp8l94p5cvttmtdqy8rvrq74qly2yrfmzkdsntqzlc5qkc4rkq.bitaxe
+fbstratumuser,data,string,bc1q5yn7xr7tp3sjg5d0anhjgpm5dn9mwzskxvhqzc.dyson
 fbstratumpass,data,string,x
 fbstratumdiff,data,u16,1000
 fbstratumxnsum,data,u16,0
