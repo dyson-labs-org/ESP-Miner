@@ -25,7 +25,7 @@ BINS_AND_ADDRS_UPDATE=($MINER_BIN_ADDR $MINER_BIN $WWW_BIN_ADDR $WWW_BIN $OTA_BI
 
 
 function show_help() {
-    echo "Creates a combined binary using esptool's merge_bin command"
+    echo "Creates a combined binary using esptool's merge-bin command"
     echo "Usage: $0 [OPTION] output_file"
     echo "    output_file: The combined binary"
     echo "    Options:"
@@ -45,9 +45,9 @@ function print_with_error_header() {
 
 #### MAIN ####
 
-# Check if esptool.py is installed and accessible
-if ! command -v esptool.py &> /dev/null; then
-    echo "esptool.py is not installed or not in PATH. Please install it first."
+# Check if esptool is installed and accessible
+if ! command -v esptool &> /dev/null; then
+    echo "esptool is not installed or not in PATH. Please install it first."
     echo "pip install esptool"
     exit 1
 fi
@@ -96,7 +96,7 @@ fi
 
 selected_bins=()
 selected_bins_and_addrs=()
-esptool_leading_args="--chip esp32s3 merge_bin --flash_mode dio --flash_size 16MB --flash_freq 80m"
+esptool_leading_args="--chip esp32s3 merge-bin --flash-mode dio --flash-size 16MB --flash-freq 80m"
 
 if [ "$update_only" -eq 1 ]; then
     selected_bins+=(${BINS_UPDATE[@]})
@@ -120,10 +120,10 @@ for file in "${selected_bins[@]}"; do
     fi
 done
 
-# Call esptool.py with the specified arguments
-esptool.py $esptool_leading_args "${selected_bins_and_addrs[@]}" -o "$output_file"
+# Call esptool with the specified arguments
+esptool $esptool_leading_args "${selected_bins_and_addrs[@]}" -o "$output_file"
 
-# Check if esptool.py command was successful
+# Check if esptool command was successful
 if [ $? -eq 0 ]; then
     echo "Successfully created $output_file"
 else

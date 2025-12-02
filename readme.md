@@ -132,8 +132,13 @@ In order to unlock the Input fields for ASIC Frequency and ASIC Core Voltage you
 
 ### Prerequisites
 
-- Install the ESP-IDF toolchain from https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/
-- Install nodejs/npm from https://nodejs.org/en/download
+- **ESP-IDF**: Version 5.5.0 or 6.0+ required
+  - Install the ESP-IDF toolchain from https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/
+  - The codebase supports both ESP-IDF 5.5.x and 6.0+ using conditional compilation
+  - For ESP-IDF 6.0 migration notes, see `docs/ESP-IDF-6.0-MIGRATION.md`
+- **CMake**: Version 3.16 or later (3.22.1+ recommended for ESP-IDF 6.0)
+- **Python**: Version 3.10 or later
+- **Node.js/npm**: Install from https://nodejs.org/en/download
 - (Optional) Install the ESP-IDF extension for VSCode from https://marketplace.visualstudio.com/items?itemName=espressif.esp-idf-extension
 
 ### Building

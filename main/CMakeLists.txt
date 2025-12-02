@@ -59,7 +59,8 @@ INCLUDE_DIRS
 
 PRIV_REQUIRES
     "app_update"
-    "driver"
+    "esp_driver_uart"
+    "esp_driver_gpio"
     "esp_adc"
     "esp_app_format"
     "esp_event"
@@ -68,7 +69,7 @@ PRIV_REQUIRES
     "esp_psram"
     "esp_timer"
     "esp_wifi"
-    "json"
+    "cjson"
     "nvs_flash"
     "spiffs"
     "vfs"

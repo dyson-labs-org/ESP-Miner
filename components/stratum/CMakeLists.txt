@@ -8,7 +8,7 @@ INCLUDE_DIRS
     "include"
 
 REQUIRES
-    "json"
+    "cjson"
     "mbedtls"
     "app_update"
     "esp_timer"
