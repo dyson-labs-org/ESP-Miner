@@ -170,6 +170,7 @@ typedef struct
 
 /* public functions */
 esp_err_t TPS546_init(TPS546_CONFIG config);
+esp_err_t TPS546_disable(void);
 
 void TPS546_read_mfr_info(uint8_t *);
 void TPS546_write_entire_config(void);
@@ -187,5 +188,6 @@ esp_err_t TPS546_check_status(GlobalState * GLOBAL_STATE);
 esp_err_t TPS546_clear_faults(void);
 
 const char* TPS546_get_error_message(void); //Get the current TPS error message
+bool TPS546_is_disabled(void); //Check if OPERATION register is OFF
 
 #endif /* TPS546_H_ */

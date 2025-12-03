@@ -4,6 +4,7 @@
 #include "global_state.h"
 #include "serial.h"
 #include "utils.h"
+#include "../../main/power/asic_reset.h"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -32,9 +33,16 @@
 #define CMD_READ 0x02
 #define CMD_INACTIVE 0x03
 
+// Known register addresses (from BM1370 - may be wrong for Auradine!)
 #define AURADINE_CHIP_ID_REG 0x00
 #define MISC_CONTROL 0x18
 #define FAST_UART_CONFIGURATION 0x28
+
+// TODO: Discover actual hex addresses for these Auradine registers:
+// - PLL_CONFIG (PLL configuration)
+// - PLL_FREQ (PLL frequency setting)
+// - VCO (voltage-controlled oscillator)
+// Currently using 0x08 from BM1370 as a guess
 
 static const register_type_t REGISTER_MAP[] = {
     [0x4C] = REGISTER_ERROR_COUNT,
@@ -120,7 +128,7 @@ static void _set_chip_address(uint8_t chipAddr)
     _send_AURADINE((TYPE_CMD | GROUP_SINGLE | CMD_SETADDRESS), read_address, 2, AURADINE_SERIALTX_DEBUG);
 }
 
-void AURADINE_set_version_mask(uint32_t version_mask)
+void AURADINE_TREASURE_set_version_mask(uint32_t version_mask)
 {
     int versions_to_roll = version_mask >> 13;
     uint8_t version_byte0 = (versions_to_roll >> 8);
@@ -129,7 +137,7 @@ void AURADINE_set_version_mask(uint32_t version_mask)
     _send_AURADINE(TYPE_CMD | GROUP_ALL | CMD_WRITE, version_cmd, 6, AURADINE_SERIALTX_DEBUG);
 }
 
-void AURADINE_send_hash_frequency(float target_freq)
+void AURADINE_TREASURE_send_hash_frequency(float target_freq)
 {
     uint8_t fb_divider, refdiv, postdiv1, postdiv2;
     float frequency;
@@ -138,32 +146,92 @@ void AURADINE_send_hash_frequency(float target_freq)
 
     uint8_t vdo_scale = (fb_divider * FREQ_MULT / refdiv >= 2400) ? 0x50 : 0x40;
     uint8_t postdiv = (((postdiv1 - 1) & 0xf) << 4) | ((postdiv2 - 1) & 0xf);
+
+    // NOTE: Register 0x08 is a GUESS from BM1370!
+    // Auradine has PLL_CONFIG, PLL_FREQ, and VCO registers but we don't know their addresses yet.
+    // This might be PLL_FREQ, PLL_CONFIG, or VCO - will discover via register scan.
     uint8_t freqbuf[6] = {0x00, 0x08, vdo_scale, fb_divider, refdiv, postdiv};
 
     _send_AURADINE(TYPE_CMD | GROUP_ALL | CMD_WRITE, freqbuf, 6, AURADINE_SERIALTX_DEBUG);
 
-    ESP_LOGI(TAG, "Setting Frequency to %g MHz (%g)", target_freq, frequency);
+    ESP_LOGI(TAG, "Setting Frequency to %g MHz (%g) [Register 0x08 - may be wrong!]", target_freq, frequency);
 }
 
-uint8_t AURADINE_init(float frequency, uint16_t asic_count, uint16_t difficulty)
+uint8_t AURADINE_TREASURE_init(float frequency, uint16_t asic_count, uint16_t difficulty)
 {
-    ESP_LOGI(TAG, "Initializing Auradine ASIC");
+    ESP_LOGI(TAG, "============================================");
+    ESP_LOGI(TAG, "   AURADINE TREASURE INITIALIZATION");
+    ESP_LOGI(TAG, "============================================");
+    ESP_LOGI(TAG, "Expected CHIP_ID: 0x%04X (MAY BE WRONG!)", AURADINE_CHIP_ID);
+    ESP_LOGI(TAG, "Expected response length: %d bytes (MAY BE WRONG!)", AURADINE_CHIP_ID_RESPONSE_LENGTH);
     ESP_LOGW(TAG, "Auradine driver is a SKELETON - actual chip communication must be implemented from datasheet");
+    ESP_LOGI(TAG, "");
 
+    ESP_LOGI(TAG, "Step 1: Setting version mask...");
     for (int i = 0; i < 3; i++) {
-        AURADINE_set_version_mask(STRATUM_DEFAULT_VERSION_MASK);
+        AURADINE_TREASURE_set_version_mask(STRATUM_DEFAULT_VERSION_MASK);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
-    _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_READ), (uint8_t[]){0x00, AURADINE_CHIP_ID_REG}, 2, AURADINE_SERIALTX_DEBUG);
+    ESP_LOGI(TAG, "Step 2: Discovering chip address...");
+    ESP_LOGI(TAG, "  CRITICAL: Chips may not respond to address 0x00 by default!");
+    ESP_LOGI(TAG, "  Testing multiple addresses to find which one works...");
+    AURADINE_TREASURE_scan_chip_addresses(150);
 
+    ESP_LOGI(TAG, "Step 3: Sending CHIP_ID read command...");
+    ESP_LOGI(TAG, "  Register: 0x%02X", AURADINE_CHIP_ID_REG);
+    ESP_LOGI(TAG, "  Using address 0x00 (update if chip responds to different address!)");
+    _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_READ), (uint8_t[]){0x00, AURADINE_CHIP_ID_REG}, 2, true);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+
+    ESP_LOGI(TAG, "Step 4: Detecting chips...");
+    ESP_LOGI(TAG, "  Watch for CHIP_ID mismatch warnings below!");
+    ESP_LOGI(TAG, "  The actual chip ID will be in the hex dump.");
     int chip_counter = count_asic_chips(asic_count, AURADINE_CHIP_ID, AURADINE_CHIP_ID_RESPONSE_LENGTH);
 
     if (chip_counter == 0) {
-        ESP_LOGW(TAG, "No Auradine chips detected - this is expected if using skeleton driver");
-        return 0;
+        ESP_LOGW(TAG, "No Auradine chips detected - continuing anyway to program PLL and enable VDD_HASH");
+        ESP_LOGW(TAG, "Per docs: PLL must be programmed BEFORE VDD_HASH is enabled");
+        ESP_LOGW(TAG, "Assuming 2 chips for configuration purposes...");
+        chip_counter = 2;  // Assume 2 chips to continue initialization
     }
 
-    AURADINE_set_version_mask(STRATUM_DEFAULT_VERSION_MASK);
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Step 5: Discovering ASIC architecture...");
+    ESP_LOGI(TAG, "  Hash engines (from datasheet): 238");
+    ESP_LOGI(TAG, "  Frequency range: 1600-4800 MHz (MUST ramp in 10%% steps!)");
+    ESP_LOGI(TAG, "  Target frequency: %d MHz", (int)frequency);
+    ESP_LOGI(TAG, "  Expected hashrate: %.2f GH/s @ %d MHz",
+             (frequency * 238 * chip_counter) / 1000.0, (int)frequency);
+    ESP_LOGI(TAG, "  Hashrate at min (1600 MHz): %.2f GH/s", (1600 * 238 * chip_counter) / 1000.0);
+    ESP_LOGI(TAG, "  Hashrate at max (4800 MHz): %.2f GH/s", (4800 * 238 * chip_counter) / 1000.0);
+
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Step 6: Probing hash domain registers...");
+    ESP_LOGI(TAG, "  Trying to read registers 0x88-0x8B (DOMAIN_0-3_COUNT)");
+    ESP_LOGI(TAG, "  and 0x8C (TOTAL_COUNT)...");
+
+    // Try reading domain registers to discover how many exist
+    for (uint8_t reg = 0x88; reg <= 0x8C; reg++) {
+        _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_READ), (uint8_t[]){0x00, reg}, 2, true);
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+    }
+
+    ESP_LOGI(TAG, "  Watch RX debug output to see if hash domain registers respond");
+    ESP_LOGI(TAG, "  If registers respond, hash_domains should be updated accordingly");
+    ESP_LOGI(TAG, "");
+
+    // OPTIONAL: Comprehensive register scan to discover Auradine register map
+    // Uncomment this once you're getting RX responses from the chip
+    // This will try reading ALL registers from 0x00 to 0xFF to see which ones exist
+    #ifdef AURADINE_REGISTER_DISCOVERY
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Step 6b: Comprehensive register discovery scan...");
+    ESP_LOGI(TAG, "  This will take a few minutes - scanning 0x00 to 0xFF");
+    AURADINE_TREASURE_scan_registers(0x00, 0xFF, 100);
+    #endif
+
+    AURADINE_TREASURE_set_version_mask(STRATUM_DEFAULT_VERSION_MASK);
 
     _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_WRITE), (uint8_t[]){0x00, 0xA8, 0x00, 0x07, 0x00, 0x00}, 6, AURADINE_SERIALTX_DEBUG);
 
@@ -204,23 +272,31 @@ uint8_t AURADINE_init(float frequency, uint16_t asic_count, uint16_t difficulty)
     _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_WRITE), (uint8_t[]){0x00, 0xB9, 0x00, 0x00, 0x44, 0x80}, 6, AURADINE_SERIALTX_DEBUG);
     _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_WRITE), (uint8_t[]){0x00, 0x3C, 0x80, 0x00, 0x8D, 0xEE}, 6, AURADINE_SERIALTX_DEBUG);
 
-    do_frequency_transition(frequency, AURADINE_send_hash_frequency);
+    ESP_LOGI(TAG, "Setting hash frequency (with 10%% ramping for safety)...");
+    do_frequency_transition_auradine(frequency, AURADINE_TREASURE_send_hash_frequency);
 
     unsigned char set_10_hash_counting[6] = {0x00, 0x10, 0x00, 0x00, 0x1E, 0xB5};
     _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_WRITE), set_10_hash_counting, 6, AURADINE_SERIALTX_DEBUG);
 
-    ESP_LOGI(TAG, "Auradine ASIC initialization sequence complete (skeleton)");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Step 4: Enabling VDD_HASH (hash core power)...");
+    if (vdd_hash_enable() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable VDD_HASH!");
+        ESP_LOGW(TAG, "Continuing anyway, but hash cores may not be powered...");
+    }
+
+    ESP_LOGI(TAG, "Auradine ASIC initialization sequence complete");
     return chip_counter;
 }
 
-int AURADINE_set_default_baud(void)
+int AURADINE_TREASURE_set_default_baud(void)
 {
     unsigned char baudrate[] = {0x00, MISC_CONTROL, 0x00, 0x00, 0b01111010, 0b00110001};
     _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_WRITE), baudrate, 6, AURADINE_SERIALTX_DEBUG);
     return 115749;
 }
 
-int AURADINE_set_max_baud(void)
+int AURADINE_TREASURE_set_max_baud(void)
 {
     ESP_LOGI(TAG, "Setting max baud of 1000000");
 
@@ -231,7 +307,7 @@ int AURADINE_set_max_baud(void)
 
 static uint8_t id = 0;
 
-void AURADINE_send_work(void * pvParameters, bm_job * next_bm_job)
+void AURADINE_TREASURE_send_work(void * pvParameters, bm_job * next_bm_job)
 {
     GlobalState * GLOBAL_STATE = (GlobalState *) pvParameters;
 
@@ -263,7 +339,7 @@ void AURADINE_send_work(void * pvParameters, bm_job * next_bm_job)
     _send_AURADINE((TYPE_JOB | GROUP_SINGLE | CMD_WRITE), (uint8_t *)&job, sizeof(AURADINE_job), AURADINE_DEBUG_WORK);
 }
 
-task_result * AURADINE_process_work(void * pvParameters)
+task_result * AURADINE_TREASURE_process_work(void * pvParameters)
 {
     auradine_asic_result_t asic_result = {0};
 
@@ -310,7 +386,7 @@ task_result * AURADINE_process_work(void * pvParameters)
     return &result;
 }
 
-void AURADINE_read_registers(void)
+void AURADINE_TREASURE_read_registers(void)
 {
     int size = sizeof(REGISTER_MAP) / sizeof(REGISTER_MAP[0]);
     for (int reg = 0; reg < size; reg++) {
@@ -319,4 +395,82 @@ void AURADINE_read_registers(void)
             vTaskDelay(1 / portTICK_PERIOD_MS);
         }
     }
+}
+
+void AURADINE_TREASURE_scan_chip_addresses(uint16_t delay_ms)
+{
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "╔════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║          CHIP ADDRESS DISCOVERY                        ║");
+    ESP_LOGI(TAG, "╚════════════════════════════════════════════════════════╝");
+    ESP_LOGI(TAG, "Board has 2 chips with fixed IDs:");
+    ESP_LOGI(TAG, "  - Chip L2R: ID 0x00");
+    ESP_LOGI(TAG, "  - Chip R2L: ID 0x80");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Testing these addresses plus common alternatives...");
+    ESP_LOGI(TAG, "");
+
+    // Known addresses plus common alternatives
+    uint8_t test_addresses[] = {0x00, 0x80, 0x01, 0x02, 0x10, 0x20, 0x40, 0xFF};
+
+    for (int i = 0; i < sizeof(test_addresses); i++) {
+        uint8_t chip_addr = test_addresses[i];
+        const char *label = "";
+        if (chip_addr == 0x00) label = " (L2R chip)";
+        else if (chip_addr == 0x80) label = " (R2L chip)";
+
+        ESP_LOGI(TAG, "Trying chip address 0x%02X%s: Reading CHIP_ID register...", chip_addr, label);
+        _send_AURADINE((TYPE_CMD | GROUP_SINGLE | CMD_READ), (uint8_t[]){chip_addr, 0x00}, 2, true);
+
+        // EXPLICIT RX test - try to read response
+        uint8_t rx_buf[32];
+        ESP_LOGI(TAG, "  Waiting for RX response...");
+        int rx_bytes = SERIAL_rx(rx_buf, sizeof(rx_buf), delay_ms);
+        if (rx_bytes > 0) {
+            ESP_LOGI(TAG, "  ✓ GOT RX RESPONSE! %d bytes", rx_bytes);
+            ESP_LOG_BUFFER_HEX(TAG, rx_buf, rx_bytes);
+        } else {
+            ESP_LOGW(TAG, "  ✗ No RX response (timeout or 0 bytes)");
+        }
+    }
+
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Chip address scan complete.");
+    ESP_LOGI(TAG, "Expected: RX responses from 0x00 (L2R) and 0x80 (R2L)");
+    ESP_LOGI(TAG, "");
+}
+
+void AURADINE_TREASURE_scan_registers(uint8_t start_addr, uint8_t end_addr, uint16_t delay_ms)
+{
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "╔════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG, "║          REGISTER DISCOVERY SCAN                       ║");
+    ESP_LOGI(TAG, "╚════════════════════════════════════════════════════════╝");
+    ESP_LOGI(TAG, "Scanning registers 0x%02X to 0x%02X", start_addr, end_addr);
+    ESP_LOGI(TAG, "Using chip address 0x00 (broadcast)");
+    ESP_LOGI(TAG, "Watch RX debug output for responses...");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Legend:");
+    ESP_LOGI(TAG, "  - If you see RX data: Register exists and returned a value");
+    ESP_LOGI(TAG, "  - If you see TIMEOUT: Register doesn't exist or doesn't respond");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "NOTE: If you get no responses, the chip might not respond to address 0x00!");
+    ESP_LOGI(TAG, "      Run AURADINE_TREASURE_scan_chip_addresses() first to find the right address.");
+    ESP_LOGI(TAG, "");
+
+    for (uint8_t reg = start_addr; reg <= end_addr; reg++) {
+        ESP_LOGI(TAG, "Reading register 0x%02X...", reg);
+        _send_AURADINE((TYPE_CMD | GROUP_ALL | CMD_READ), (uint8_t[]){0x00, reg}, 2, true);
+
+        // Give time for response
+        vTaskDelay(delay_ms / portTICK_PERIOD_MS);
+
+        // Note: Actual response detection happens in SERIAL_rx debug output
+        // We're just spacing out the reads to make logs readable
+    }
+
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Register scan complete. Check RX logs above.");
+    ESP_LOGI(TAG, "Registers that responded are candidates for the register map.");
+    ESP_LOGI(TAG, "");
 }

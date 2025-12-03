@@ -69,6 +69,7 @@ typedef struct
     int pool_addr_family;
     bool overheat_mode;
     uint16_t power_fault;
+    bool allow_core_voltage;
     uint32_t lastClockSync;
     bool is_screen_active;
     bool is_firmware_update;

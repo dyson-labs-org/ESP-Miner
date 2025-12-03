@@ -21,6 +21,7 @@ static const char *TAG = "serial";
 esp_err_t SERIAL_init(void)
 {
     ESP_LOGI(TAG, "Initializing serial");
+    esp_err_t err;
     // Configure UART1 parameters
     uart_config_t uart_config = {
         .baud_rate = UART_FREQ,
@@ -31,14 +32,31 @@ esp_err_t SERIAL_init(void)
         .rx_flow_ctrl_thresh = 122,
     };
     // Configure UART1 parameters
-    ESP_ERROR_CHECK_WITHOUT_ABORT(uart_param_config(UART_NUM_1, &uart_config));
+    ESP_LOGI(TAG, "uart_param_config...");
+    err = uart_param_config(UART_NUM_1, &uart_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "uart_param_config failed: %d", err);
+        return err;
+    }
     // Set UART1 pins(TX: IO17, RX: I018)
-    ESP_ERROR_CHECK_WITHOUT_ABORT(uart_set_pin(UART_NUM_1, ECHO_TEST_TXD, ECHO_TEST_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_LOGI(TAG, "uart_set_pin...");
+    err = uart_set_pin(UART_NUM_1, ECHO_TEST_TXD, ECHO_TEST_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "uart_set_pin failed: %d", err);
+        return err;
+    }
 
+    ESP_LOGI(TAG, "uart_driver_install...");
     // Install UART driver (we don't need an event queue here)
     // tx buffer 0 so the tx time doesn't overlap with the job wait time
     //  by returning before the job is written
-    return uart_driver_install(UART_NUM_1, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0);
+    err = uart_driver_install(UART_NUM_1, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "uart_driver_install failed: %d", err);
+    } else {
+        ESP_LOGI(TAG, "uart_driver_install complete");
+    }
+    return err;
 }
 
 bool SERIAL_is_initialized(void)
@@ -78,13 +96,21 @@ int16_t SERIAL_rx(uint8_t *buf, uint16_t size, uint16_t timeout_ms)
 {
     int16_t bytes_read = uart_read_bytes(UART_NUM_1, buf, size, timeout_ms / portTICK_PERIOD_MS);
 
-    #if BM1397_SERIALRX_DEBUG || BM1366_SERIALRX_DEBUG || BM1368_SERIALRX_DEBUG || BM1370_SERIALRX_DEBUG
+    #if BM1397_SERIALRX_DEBUG || BM1366_SERIALRX_DEBUG || BM1368_SERIALRX_DEBUG || BM1370_SERIALRX_DEBUG || AURADINE_SERIALRX_DEBUG
     size_t buff_len = 0;
+    uart_get_buffered_data_len(UART_NUM_1, &buff_len);
+
     if (bytes_read > 0) {
-        uart_get_buffered_data_len(UART_NUM_1, &buff_len);
         printf("rx: ");
         prettyHex((unsigned char*) buf, bytes_read);
-        printf(" [%d]\n", buff_len);
+        printf(" [%d bytes, %d in buffer]\n", bytes_read, buff_len);
+    } else {
+        // Log timeout with buffer status
+        if (buff_len > 0) {
+            printf("rx: TIMEOUT but %d bytes in buffer (framing issue?)\n", buff_len);
+        } else {
+            printf("rx: TIMEOUT after %d ms (0 bytes received, buffer empty)\n", timeout_ms);
+        }
     }
     #endif
 

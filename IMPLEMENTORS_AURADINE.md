@@ -4,23 +4,245 @@
 
 This guide provides detailed instructions for completing the Auradine ASIC driver implementation in ESP-Miner. The skeleton driver has been created based on the BM1370 reference implementation, but requires actual chip-specific values and initialization sequences from the Auradine datasheet.
 
-**Current Status**: Driver skeleton is complete and integrated with the build system. All function stubs exist but use placeholder/BM1370-derived values.
+**Current Status**: Hardware bring-up in progress. Power, I2C, and GPIO diagnostics complete. Serial TX working, awaiting RX responses.
 
 **Your Task**: Using the Auradine datasheet, replace placeholder values with actual chip-specific constants and implement the correct initialization sequence.
 
+---
+
+## 🔍 **Hardware Bring-Up Discoveries (Dec 2025)**
+
+### ✅ **Confirmed Working**
+
+#### Power System
+- **TPS546 Voltage Regulator**: Configured correctly for Auradine low-voltage operation
+  - VOUT range: 0.4V - 0.8V (AURA config)
+  - Per-chip voltage: 310mV
+  - Total output: 620mV (310mV × 2 voltage domains)
+  - Readback accuracy: ±3mV (excellent!)
+  - VReg temperature monitoring: 44°C typical
+  - Input voltage: 12.23V
+
+#### ASIC Architecture (From Datasheet)
+- **Chip configuration**: 2 chips on board
+  - Chip "L2R": Fixed ID = **0x00**
+  - Chip "R2L": Fixed ID = **0x80** (128 decimal)
+  - Commands must be addressed to specific chip IDs
+- **Hash engines**: 238 per chip
+  - Each engine contains 4 unrolled double SHA-256 cores
+  - `small_core_count = 238` ✓
+  - `core_count = 238` (set equal to small_core_count for now)
+  - `hash_domains = 4` (assumed from BM1370, needs verification)
+
+#### Frequency Configuration (CRITICAL)
+- **Operating range**: 1600 - 4800 MHz (NOT MHz like BM chips!)
+- **Maximum step size**: 10% of current frequency
+  - This is a HARDWARE REQUIREMENT to prevent damage
+  - Example: At 2000 MHz, max step is 200 MHz
+  - Implemented in `do_frequency_transition_auradine()`
+- **Expected hashrate** (2 chips):
+  - At 1600 MHz (min): 761.6 GH/s (0.76 TH/s)
+  - At 2400 MHz (default): 1142.4 GH/s (1.14 TH/s)
+  - At 4800 MHz (max): 2284.8 GH/s (2.28 TH/s)
+
+#### Voltage Configuration (CRITICAL)
+- **Voltage domains**: 2 (chips wired in series)
+- **Per-chip voltage**: 310mV (NOT 1150mV like BM1370!)
+- **TPS546 output**: Per-chip voltage × voltage_domains
+- Fixed in `config-900.cvs`: `asicvoltage,data,u16,310`
+- Created `TPS546_CONFIG_AURA` in `vcore.c` with correct limits
+
+#### I2C Bus Configuration
+**Bus 0 (GPIO47/48)** - 3 devices found:
+- `0x0C`: SMBus Alert Response Address (TPS546's alert protocol)
+- `0x24`: TPS546D24ARVFR #1 (VCORE regulator) ✓
+- `0x2E`: EMC2103 Fan/Temperature Controller ✓
+
+**Missing devices:**
+- `0x40`: INA260 Power Monitor - NOT populated on board
+- TPS546 #2 / TPSM861253 - NOT on I2C (in pin-strap mode, fixed voltage)
+
+#### GPIO Configuration
+- **GPIO17**: UART TX to ASIC ✓
+- **GPIO18**: UART RX from ASIC ✓
+- **GPIO1**: ASIC_RESET (active LOW reset, should be HIGH for operation) ✓
+- **GPIO2**: VDD_HASH (hash core power enable, should be HIGH after config) ✓
+- **GPIO10**: ASIC_ENABLE (LOW = power ON, HIGH = power OFF)
+- **GPIO47**: I2C SDA ✓
+- **GPIO48**: I2C SCL ✓
+
+**Initialization sequence (CRITICAL for Auradine):**
+1. Establish serial clock (UART initialization at 115200 baud)
+2. Reset ASIC (GPIO1: LOW → HIGH sequence)
+3. Send configuration commands
+4. Enable hash cores (GPIO2/VDD_HASH: LOW → HIGH)
+
+#### Serial Communication
+- **TX path working**: Commands being sent to chip
+  - Baud rate: 115200 (initial)
+  - Preamble: `55 AA` ✓
+  - Packet structure correct ✓
+  - Example: `tx: [55 AA 51 09 00 A4 90 00 FF FF 1C]` (version mask)
+  - Example: `tx: [55 AA 52 05 00 00 0A]` (chip ID read)
+
+### ⚠️ **Known Issues**
+
+#### No RX Responses from ASIC
+- **Symptom**: TX commands sent, zero bytes received
+- **Root cause discovered**: GPIO1 (ASIC_RESET) stuck LOW
+  - ASIC held in reset - cannot respond
+  - GPIO10 (ASIC_ENABLE) was HIGH - power disabled
+- **Fix implemented**: Enhanced reset sequence with verification
+  - `asic_reset()` now logs each step with readback
+  - `verify_gpio_states()` forces GPIO1 HIGH if needed
+  - Returns error if GPIO cannot be set HIGH
+
+#### Temperature Sensors Not Working
+- **Symptom**: `-1.0°C` readings from EMC2103
+- **Cause**: External temperature diodes not connected or need configuration
+  - Internal sensor reads VReg temp correctly
+  - External sensor 1: Not available
+  - External sensor 2: Not available
+- **Impact**: Fan runs at 100% due to invalid temp readings
+- **Possible fix needed**: Configure diode ideality factor and beta compensation
+
+#### Fan RPM Reading
+- **Symptom**: 960 RPM reading with no fan attached
+- **Cause**: No fan connected, just heat sink
+- **Impact**: Reading is noise/default value (expected behavior)
+
+### 🔧 **Diagnostic Tools Implemented**
+
+#### 1. I2C Bus Discovery (`system.c`)
+- Scans both I2C Bus 0 and Bus 1 (if available)
+- Identifies devices by address range
+- Probes PMBus registers (MFR_ID, MFR_MODEL, MFR_REVISION)
+- Compares configured vs. actual hardware
+
+#### 2. GPIO State Verification (`asic_init.c`)
+- Reads ASIC_RESET and ASIC_ENABLE pin states
+- Warns if ASIC is in reset or powered off
+- **Automatically forces GPIO1 HIGH** if stuck LOW
+- Verifies correction succeeded
+
+#### 3. UART Loopback Test (`asic_init.c`)
+- Sends test pattern and attempts to receive it
+- Verifies UART RX path functionality
+- Only works if TX/RX physically jumpered (optional test)
+
+#### 4. RX Timeout Logging (`serial.c`)
+- Logs every RX attempt with timeout duration
+- Shows if ANY bytes received (even garbage)
+- Indicates if data stuck in buffer (framing issue)
+
+#### 5. Enhanced Reset Sequence (`asic_reset.c`)
+- Logs initial GPIO state
+- Verifies GPIO changes with readback after each step
+- Holds GPIO1 HIGH after reset (not just pulsed)
+- Returns error if GPIO doesn't stay HIGH
+- Detects hardware pull-down or GPIO conflicts
+
+#### 6. VDD_HASH Power Control (`asic_reset.c`)
+- `vdd_hash_enable()`: Enables hash core power (GPIO2 HIGH)
+- `vdd_hash_disable()`: Disables hash core power (GPIO2 LOW)
+- Logs each step with GPIO readback verification
+- Called automatically at end of initialization sequence
+- Returns error if GPIO doesn't stay in desired state
+
+#### 7. Chip Address Discovery (`auradine.c`)
+- `AURADINE_TREASURE_scan_chip_addresses(delay_ms)`: Verifies chip addresses
+- **Board configuration**: 2 chips with fixed IDs
+  - L2R chip: 0x00
+  - R2L chip: 0x80
+- Tests both known addresses plus common alternatives
+- Reads CHIP_ID register (0x00) from each chip
+- Should see RX responses from both 0x00 and 0x80
+- **Runs automatically** at initialization (Step 2)
+
+#### 8. Register Discovery Scanner (`auradine.c`)
+- `AURADINE_TREASURE_scan_registers(start, end, delay_ms)`: Scans register range
+- Systematically reads each register address in the specified range
+- Logs TX commands and watches for RX responses
+- Enable full scan (0x00-0xFF) by uncommenting `#define AURADINE_REGISTER_DISCOVERY` in `auradine.h`
+- **Usage**: Once you get RX responses from chip, enable this to discover the complete register map
+- **Warning**: Full scan takes ~30 seconds and generates extensive logs
+
+---
+
+## 📋 **Next Steps for Bring-Up**
+
+### Immediate Actions Required
+
+1. **Resolve GPIO1 Issue**
+   - Boot with enhanced diagnostics
+   - Verify GPIO1 goes HIGH during reset
+   - Check if hardware pull-down exists
+   - If forced HIGH works → investigate what changes it back to LOW
+
+2. **Get First RX Response**
+   - Once GPIO1 confirmed HIGH, retry chip detection
+   - Monitor for ANY RX data (even garbage indicates baud/timing issue)
+   - Check serial-X.log for detailed diagnostics
+
+3. **Identify Chip**
+   - Current CHIP_ID: `0xAD00` (placeholder, probably wrong)
+   - Current response length: `11` bytes (probably wrong)
+   - Actual chip ID will appear in RX logs once chip responds
+
+4. **Verify Serial Protocol**
+   - Preamble: `55 AA` (assumed from BM chips)
+   - Packet structure: `[preamble][header][length][data][crc]`
+   - May need adjustment based on Auradine datasheet
+
+5. **Discover Register Map** (ONCE RX WORKING)
+   - Enable register discovery: Uncomment `#define AURADINE_REGISTER_DISCOVERY` in `auradine.h`
+   - Rebuild and boot - will scan all registers 0x00-0xFF
+   - Analyze RX logs to identify which registers responded
+   - Document discovered registers and their values
+   - **Look for these known registers** (names known, addresses unknown):
+     - `PLL_CONFIG` - PLL configuration
+     - `PLL_FREQ` - PLL frequency setting
+     - `VCO` - Voltage-controlled oscillator
+     - CHIP_ID (probably 0x00)
+     - Hash domain counters
+     - Error counters
+   - Compare with BM1370 register map to find differences
+
+### Open Questions
+
+- [ ] What is the actual Auradine chip ID?
+- [ ] What is the chip ID response format and length?
+- [ ] Does the serial protocol match BM chips or is it different?
+- [ ] What baud rate does the chip expect? (trying 115200 initially)
+- [ ] How many hash domains does the chip actually have?
+- [ ] **What are the hex addresses for known registers?**
+  - `PLL_CONFIG` - PLL configuration register
+  - `PLL_FREQ` - PLL frequency register
+  - `VCO` - VCO (voltage-controlled oscillator) register
+  - Need to discover hex addresses via register scan
+
+---
+
 ## Quick Reference
 
-### Files Created/Modified in Sprint 2
+### Files Created/Modified
 
-**New Files:**
+**Hardware Bring-Up (Sprint 2-3):**
+- `/main/Kconfig.projbuild` - Updated frequency range (1600-4800 MHz), voltage range (240-1800 mV), added GPIO_VDD_HASH
+- `/main/power/asic_reset.c` - Enhanced reset sequence, added VDD_HASH power control
+- `/main/power/asic_reset.h` - Added vdd_hash_enable() and vdd_hash_disable() declarations
+- `/main/power/asic_init.c` - Reordered initialization (serial → reset → config → VDD_HASH)
+- `/components/asic/auradine.c` - ASIC driver with Auradine-specific frequency ramping
+- `/components/asic/frequency_transition_bmXX.c` - Added do_frequency_transition_auradine() with 10% stepping
+- `/components/asic/include/frequency_transition_bmXX.h` - Added Auradine frequency transition declaration
+
+**Initial Driver (Sprint 2):**
 - `/components/asic/auradine.c` - ASIC driver implementation (SKELETON)
 - `/components/asic/include/auradine.h` - ASIC driver header
-- `/IMPLEMENTORS_AURADINE.md` - This document
-
-**Modified Files:**
 - `/components/asic/asic.c` - Added Auradine to abstraction layer
 - `/components/asic/CMakeLists.txt` - Added auradine.c to build
 - `/main/device_config.h` - Added AURADINE enum, configs, board version 900
+- `/IMPLEMENTORS_AURADINE.md` - This document
 
 ### Board Configuration: Version 900
 
@@ -97,19 +319,21 @@ The skeleton driver uses BM1370 register addresses. You must replace these with 
 
 ### 1.4 ASIC Specifications
 
-Update `/main/device_config.h` with actual values:
+Known values for Auradine board version 900:
 
-| Parameter | Location | Current Value | Your Value |
-|-----------|----------|---------------|------------|
-| Core Count | device_config.h:95 | 128 | __________ |
-| Small Core Count | device_config.h:95 | 2040 | __________ |
-| Hash Domains | device_config.h:95 | 4 | __________ |
-| Default Frequency | device_config.h:95 | 600 MHz | __________ |
-| Default Voltage | device_config.h:95 | 1200 mV | __________ |
-| Frequency Range | device_config.h:83 | 400-700 MHz | __________ |
-| Voltage Range | device_config.h:89 | 1000-1300 mV | __________ |
+| Parameter | Location | Configured Value | Notes |
+|-----------|----------|------------------|-------|
+| Core Count | device_config.h:95 | 238 | ✓ Confirmed from datasheet |
+| Small Core Count | device_config.h:95 | 238 | ✓ Each has 4 double SHA-256 |
+| Hash Domains | device_config.h:95 | 4 | Assumed from BM1370 |
+| Default Frequency | Kconfig.projbuild:69 | 2400 MHz | ✓ Middle of range |
+| Default Voltage | Kconfig.projbuild:62 | 310 mV | ✓ Per chip (620mV total) |
+| Frequency Range | Kconfig.projbuild:68 | 1600-4800 MHz | ✓ From datasheet |
+| Voltage Range | Kconfig.projbuild:61 | 240-1800 mV | Allows full range |
+| **Max Freq Step** | **CRITICAL** | **10% max** | **Hardware requirement!** |
 
-**Action**: Replace placeholder values with actual specifications from datasheet.
+**CRITICAL**: Frequency changes MUST be ramped in steps ≤10% to prevent chip damage.
+This is implemented in `do_frequency_transition_auradine()` (frequency_transition_bmXX.c:15-54).
 
 ### 1.5 PLL Configuration
 

@@ -1,0 +1,60 @@
+What is Auradine Treasure frequency?
+
+Teraflux devices:
+    AI2500
+    AT2880
+
+Has 3 voltages:
+    VDD_IO  1.5V for serial I/O
+    VDD_RO  low voltage supply for process moitoring ring oscillators. 
+            Should be shorted to VDD_DLV in operation
+            240mV-350mV
+    VDD_SCV 0.75V for the uncore
+    VDD_DLV Low voltage, high current supply for hash engines 
+            240mV - 350mV, 30A-60A
+
+Auradine mac address D0:CF:13:26:4F:81 (server?)
+Auradine mac address D0:CF:13:26:4F:80 (client?)
+
+SET CONFIG_ESP_TASK_WDT_INIT=n temporarily (disables reboot watchdog task)
+    FIXME re-enable it once serial comms established
+    • Edited sdkconfig (+3 -3)
+    2160  # default:
+    2161 -CONFIG_ESP_INT_WDT=y
+    2161 +CONFIG_ESP_INT_WDT=n
+    2162  # default:
+    2163 -CONFIG_ESP_INT_WDT_TIMEOUT_MS=300
+    2163 +# CONFIG_ESP_INT_WDT_TIMEOUT_MS is not set
+    2164  # default:
+    2165 -CONFIG_ESP_INT_WDT_CHECK_CPU1=y
+    2165 +# CONFIG_ESP_INT_WDT_CHECK_CPU1 is not set
+    2166  # default:
+
+GPIO 2 is labeled VDD. This may be used to measure Vcore.
+
+Doc is contradictary over whether RESET_N_I (RST_3V3?) should be high or low in operation.
+Saw 1 transition on GPIO 1 (settling I think)
+Saw 2 transitions on GPIO 35 -- this is not supposed to be connected.
+
+Temporarily set config in main/power/vcore.c to 0V for the hash cores.
+
+SN74AVC4T774
+    connected to RST_3V3, TX_3V3, RST_1V5, TX_1V5 (what are these)
+        RST_3V3 is GPIO 1.
+
+Need to measure 25MHz oscillator clock at several points:
+    TP30 (connected to TPS546
+
+Status report:
+    New firmware turns off the TPS546 buck converters. These buck converters should only be turned on once the Auradine command is programmed. The order of operations seems to be: 
+        1. establish VDD_IO (U2, TP2), VDD_750 (U7, TP4)
+        2. Check clock with oscilliscope at TP18, TP10
+        3. Raise TX_3V3 (GPIO 17)
+        3. raise RST_3V3 (GPIO 1)
+
+
+
+RST_1V5 needs to be wired to a GPIO. (U11 pin 13, TP13)
+    RST_3V3 should be connected to U14 pin 14, which converts it to a 1.5V signal, and the RST_1V5 output (U14 pin 3) needs to be connected to RST_1V5 on U11 pin 13.
+
+Should be able to see TP8 as either 1.5V or 0V depending on RST_3V3 (GPIO1).

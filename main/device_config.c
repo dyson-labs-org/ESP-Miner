@@ -35,14 +35,28 @@ esp_err_t device_config_init(void * pvParameters)
 
     char * device_model = nvs_config_get_string(NVS_CONFIG_DEVICE_MODEL);
 
+    bool family_found = false;
     for (int i = 0 ; i < ARRAY_SIZE(default_families); i++) {
         if (strcasecmp(default_families[i].name, device_model) == 0) {
             GLOBAL_STATE->DEVICE_CONFIG.family = default_families[i];
 
             ESP_LOGI(TAG, "Device Model: %s", GLOBAL_STATE->DEVICE_CONFIG.family.name);
-
+            family_found = true;
             break;
         }
+    }
+
+    if (!family_found) {
+        ESP_LOGE(TAG, "FATAL: Device model '%s' not found in default_families!", device_model);
+        ESP_LOGE(TAG, "Available models:");
+        for (int i = 0; i < ARRAY_SIZE(default_families); i++) {
+            ESP_LOGE(TAG, "  - %s", default_families[i].name);
+        }
+        ESP_LOGE(TAG, "Please configure NVS with a valid board version or device model");
+        ESP_LOGE(TAG, "Example: Flash config-900.cvs using bitaxetool");
+        free(board_version);
+        free(device_model);
+        return ESP_FAIL;
     }
 
     char * asic_model = nvs_config_get_string(NVS_CONFIG_ASIC_MODEL);

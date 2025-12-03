@@ -18,6 +18,13 @@ static const char *TAG = "asic";
 
 uint8_t ASIC_init(GlobalState * GLOBAL_STATE)
 {
+    if (GLOBAL_STATE->DEVICE_CONFIG.family.asic.name == NULL) {
+        ESP_LOGE(TAG, "FATAL: ASIC config not initialized! family.asic.name is NULL");
+        ESP_LOGE(TAG, "This means device_config_init() failed to set up the device family");
+        ESP_LOGE(TAG, "Check that NVS has valid board_version or device_model configured");
+        return 0;
+    }
+
     ESP_LOGI(TAG, "Initializing %dx %s", GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.name);
 
     switch (GLOBAL_STATE->DEVICE_CONFIG.family.asic.id) {
@@ -29,8 +36,8 @@ uint8_t ASIC_init(GlobalState * GLOBAL_STATE)
             return BM1368_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
         case BM1370:
             return BM1370_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
-        case AURADINE:
-            return AURADINE_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
+        case AURADINE_TREASURE:
+            return AURADINE_TREASURE_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
     }
     return ESP_OK;
 }
@@ -46,8 +53,8 @@ task_result * ASIC_process_work(GlobalState * GLOBAL_STATE)
             return BM1368_process_work(GLOBAL_STATE);
         case BM1370:
             return BM1370_process_work(GLOBAL_STATE);
-        case AURADINE:
-            return AURADINE_process_work(GLOBAL_STATE);
+        case AURADINE_TREASURE:
+            return AURADINE_TREASURE_process_work(GLOBAL_STATE);
     }
     return NULL;
 }
@@ -63,8 +70,8 @@ int ASIC_set_max_baud(GlobalState * GLOBAL_STATE)
             return BM1368_set_max_baud();
         case BM1370:
             return BM1370_set_max_baud();
-        case AURADINE:
-            return AURADINE_set_max_baud();
+        case AURADINE_TREASURE:
+            return AURADINE_TREASURE_set_max_baud();
     }
     return 0;
 }
@@ -84,8 +91,8 @@ void ASIC_send_work(GlobalState * GLOBAL_STATE, void * next_job)
         case BM1370:
             BM1370_send_work(GLOBAL_STATE, next_job);
             break;
-        case AURADINE:
-            AURADINE_send_work(GLOBAL_STATE, next_job);
+        case AURADINE_TREASURE:
+            AURADINE_TREASURE_send_work(GLOBAL_STATE, next_job);
             break;
     }
 }
@@ -105,8 +112,8 @@ void ASIC_set_version_mask(GlobalState * GLOBAL_STATE, uint32_t mask)
         case BM1370:
             BM1370_set_version_mask(mask);
             break;
-        case AURADINE:
-            AURADINE_set_version_mask(mask);
+        case AURADINE_TREASURE:
+            AURADINE_TREASURE_set_version_mask(mask);
             break;
     }
 }
@@ -126,8 +133,8 @@ bool ASIC_set_frequency(GlobalState * GLOBAL_STATE, float frequency)
         case BM1370:
             do_frequency_transition(frequency, BM1370_send_hash_frequency);
             return true;
-        case AURADINE:
-            do_frequency_transition(frequency, AURADINE_send_hash_frequency);
+        case AURADINE_TREASURE:
+            do_frequency_transition(frequency, AURADINE_TREASURE_send_hash_frequency);
             return true;
     }
     return false;
@@ -143,7 +150,9 @@ double ASIC_get_asic_job_frequency_ms(GlobalState * GLOBAL_STATE)
             return 2000 / GLOBAL_STATE->DEVICE_CONFIG.family.asic_count;
         case BM1368:
         case BM1370:
-        case AURADINE:
+            return 500 / GLOBAL_STATE->DEVICE_CONFIG.family.asic_count;
+        case AURADINE_TREASURE:
+            // FIXME
             return 500 / GLOBAL_STATE->DEVICE_CONFIG.family.asic_count;
     }
     return 500;
@@ -164,8 +173,8 @@ void ASIC_read_registers(GlobalState * GLOBAL_STATE)
         case BM1370:
             BM1370_read_registers();
             break;
-        case AURADINE:
-            AURADINE_read_registers();
+        case AURADINE_TREASURE:
+            AURADINE_TREASURE_read_registers();
             break;
     }
 }

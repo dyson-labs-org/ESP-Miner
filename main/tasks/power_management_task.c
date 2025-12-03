@@ -19,6 +19,7 @@
 #include "asic_init.h"
 #include "asic_reset.h"
 #include "driver/uart.h"
+#include "adc.h"
 
 #define EPSILON 0.0001f
 #define POLL_RATE 1800
@@ -102,6 +103,7 @@ void POWER_MANAGEMENT_task(void * pvParameters)
 
     uint16_t last_known_asic_voltage = 0;
     float last_known_asic_frequency = 0.0;
+    int last_gpio2_mv = -1;
 
     while (1) {
 
@@ -286,9 +288,26 @@ void POWER_MANAGEMENT_task(void * pvParameters)
         float asic_frequency = nvs_config_get_float(NVS_CONFIG_ASIC_FREQUENCY);
 
         if (core_voltage != last_core_voltage) {
-            ESP_LOGI(TAG, "setting new vcore voltage to %umV", core_voltage);
-            VCORE_set_voltage(GLOBAL_STATE, (double) core_voltage / 1000.0);
-            last_core_voltage = core_voltage;
+            bool tps_disabled = false;
+
+            if (GLOBAL_STATE->DEVICE_CONFIG.TPS546) {
+                tps_disabled = TPS546_is_disabled();
+            }
+
+            if (!sys_module->allow_core_voltage) {
+                ESP_LOGW(TAG, "Skipping core voltage change (%umV) until ASIC init allows power-up", core_voltage);
+            } else {
+                if (tps_disabled && core_voltage == 0) {
+                    ESP_LOGW(TAG, "Skipping core voltage set (%umV) because TPS546 is disabled (OPERATION=OFF)", core_voltage);
+                } else {
+                    if (tps_disabled && core_voltage > 0) {
+                        ESP_LOGW(TAG, "TPS546 is disabled; re-enabling by setting core voltage to %umV", core_voltage);
+                    }
+                    ESP_LOGI(TAG, "Setting ASIC core voltage to %umV (%.3fV)", core_voltage, core_voltage / 1000.0f);
+                    VCORE_set_voltage(GLOBAL_STATE, core_voltage / 1000.0f);
+                    last_core_voltage = core_voltage;
+                }
+            }
         }
 
         if (asic_frequency != last_asic_frequency) {
@@ -312,7 +331,21 @@ void POWER_MANAGEMENT_task(void * pvParameters)
             ESP_LOGI(TAG, "Overheat mode updated to: %d", sys_module->overheat_mode);
         }
 
-        VCORE_check_fault(GLOBAL_STATE);
+        bool check_faults = true;
+        if (GLOBAL_STATE->DEVICE_CONFIG.TPS546 && !sys_module->allow_core_voltage && TPS546_is_disabled()) {
+            // Skip fault polling while intentionally held OFF to avoid noisy OFF/CML warnings
+            check_faults = false;
+        }
+        if (check_faults) {
+            VCORE_check_fault(GLOBAL_STATE);
+        }
+
+        // Log ADC1_CH1 (GPIO2) when it changes
+        int gpio2_mv = ADC_get_vcore();
+        if (last_gpio2_mv < 0 || abs(gpio2_mv - last_gpio2_mv) >= 5) {
+            ESP_LOGI(TAG, "Vcore: %d mV", gpio2_mv);
+            last_gpio2_mv = gpio2_mv;
+        }
 
         // looper:
         vTaskDelay(POLL_RATE / portTICK_PERIOD_MS);

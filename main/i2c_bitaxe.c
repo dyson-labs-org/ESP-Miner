@@ -100,6 +100,16 @@ esp_err_t i2c_bitaxe_get_master_bus_handle(i2c_master_bus_handle_t * dev_handle)
 }
 
 /**
+ * @brief Probe I2C bus for device at address
+ * @param device_address The I2C device address to probe
+ * @return ESP_OK if device responds, ESP_ERR_NOT_FOUND if no device
+ */
+esp_err_t i2c_bitaxe_probe(uint8_t device_address)
+{
+    return i2c_master_probe(i2c_bus_handle, device_address, 50);  // 50ms timeout
+}
+
+/**
  * @brief Read a sequence of I2C bytes
  * @param dev_handle The I2C device handle
  * @param reg_addr The register address to read from

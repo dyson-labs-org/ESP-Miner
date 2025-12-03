@@ -485,6 +485,17 @@ esp_err_t TPS546_clear_faults(void) {
 }
 
 /**
+ * @brief Disable TPS546 output (turn off regulator completely)
+ * @return ESP_OK on success
+ */
+esp_err_t TPS546_disable(void) {
+    ESP_LOGI(TAG, "Disabling TPS546 output (OPERATION = OFF)");
+    ESP_RETURN_ON_ERROR(smb_write_byte(PMBUS_OPERATION, OPERATION_OFF), TAG, "Failed to disable TPS546");
+    ESP_LOGI(TAG, "TPS546 output disabled successfully");
+    return ESP_OK;
+}
+
+/**
  * @brief Read the manufacturer model and revision 
  * @param read_mfr_revision Pointer to store the read revision
 */
@@ -769,6 +780,17 @@ static char tps_error_message[256] = "Power Fault Detected.";
 
 const char* TPS546_get_error_message() {
     return tps_error_message;
+}
+
+bool TPS546_is_disabled(void) {
+    uint8_t operation = 0;
+
+    if (smb_read_byte(PMBUS_OPERATION, &operation) != ESP_OK) {
+        ESP_LOGW(TAG, "Unable to read OPERATION register to determine TPS546 state");
+        return false;
+    }
+
+    return operation == OPERATION_OFF;
 }
 
 
@@ -1100,4 +1122,3 @@ void TPS546_show_voltage_settings(void)
     f_value = ulinear16_2_float(u16_value);
     ESP_LOGI(TAG, "read VOUT_MIN: %.2f V", f_value);
 }
-
