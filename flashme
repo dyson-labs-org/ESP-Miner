@@ -1,0 +1,5 @@
+#!/bin/bash
+
+idf.py build \
+    && ./merge_bin.sh ./esp-miner-merged.bin \
+    && bitaxetool --port /dev/ttyACM0 --config ./config-900-narsal-1.cvs --firmware ./esp-miner-merged.bin
