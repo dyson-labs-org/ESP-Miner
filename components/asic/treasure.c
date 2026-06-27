@@ -101,7 +101,7 @@ uint8_t TREASURE_init(float frequency, uint16_t asic_count, uint16_t difficulty)
 	//SERIAL_set_baud(921600);
 
 	// Check chips
-	_read_register(0x0302, ASICID, false);
+	//_read_register(0x0302, ASICID, false);
 	//for(uint16_t x = 0x0300; x <= 0x03FF; x++) {
 	//	ESP_LOGI(TAG, "Starting transmit: %x", x);
 	//	_read_register(x, ASICID, false);
@@ -111,6 +111,12 @@ uint8_t TREASURE_init(float frequency, uint16_t asic_count, uint16_t difficulty)
 	//	ESP_LOGI(TAG, "Starting transmit: %x", x);
 	//	_read_register(0, ASICID, false);
 	//}
+	
+	// Hammer the chip.
+	for(uint16_t x = 0; x < 0xFFFF; x++) {
+		ESP_LOGI(TAG, "Starting Transmit: %x", x);
+		_read_register(0, ASICID, True);
+	}
 
 	return chip_counter;
 }
