@@ -6,6 +6,7 @@
 #include "bm1366.h"
 #include "bm1368.h"
 #include "bm1370.h"
+#include "treasure.h"
 
 #include "asic.h"
 #include "device_config.h"
@@ -29,8 +30,7 @@ uint8_t ASIC_init(GlobalState * GLOBAL_STATE)
         case BM1370:
             return BM1370_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
         case TREASURE:
-	    // TODO: Implement
-	    break;
+	    return TREASURE_init(GLOBAL_STATE->POWER_MANAGEMENT_MODULE.frequency_value, GLOBAL_STATE->DEVICE_CONFIG.family.asic_count, GLOBAL_STATE->DEVICE_CONFIG.family.asic.difficulty);
     }
     return ESP_OK;
 }
@@ -168,7 +168,7 @@ void ASIC_read_registers(GlobalState * GLOBAL_STATE)
             BM1370_read_registers();
             break;
 	case TREASURE:
-	    // TODO: Implement
+	    TREASURE_read_registers();
 	    break;
     }
 }

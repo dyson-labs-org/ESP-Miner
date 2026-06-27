@@ -2,4 +2,4 @@
 
 idf.py build \
     && ./merge_bin.sh ./esp-miner-merged.bin \
-    && bitaxetool --port /dev/ttyACM1 --config ./config-901x.cvs --firmware ./esp-miner-merged.bin
+    && bitaxetool --port /dev/ttyACM0 --config ./config-901x.cvs --firmware ./esp-miner-merged.bin
